@@ -1,0 +1,36 @@
+{
+  "name": "romi-js-api-server",
+  "version": "0.0.1",
+  "description": "web + data server for romi-dashboard",
+  "main": "index.js",
+  "scripts": {
+    "start": "ts-node index.ts",
+    "test": "jest"
+  },
+  "author": "koonpeng@openrobotics.org",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/osrf/romi-dashboard",
+    "directory": "packages/server"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^2.0.0",
+    "@osrf/romi-js-core-interfaces": "^0.1.1",
+    "@osrf/romi-js-rclnodejs-transport": "file:../romi-js-rclnodejs-transport",
+    "@types/jsonwebtoken": "^8.5.0",
+    "@types/ws": "^7.2.6",
+    "jsonwebtoken": "^8.5.1",
+    "rclnodejs": "^0.15.3",
+    "winston": "^3.3.3",
+    "ws": "^7.3.1",
+    "yargs": "^16.0.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^26.0.13",
+    "jest": "^26.4.2",
+    "ts-jest": "^26.3.0",
+    "ts-node": "^9.0.0",
+    "typescript": "^4.0.2"
+  }
+}
