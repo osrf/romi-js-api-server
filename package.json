@@ -17,7 +17,7 @@
   "dependencies": {
     "@msgpack/msgpack": "^2.0.0",
     "@osrf/romi-js-core-interfaces": "^0.1.1",
-    "@osrf/romi-js-rclnodejs-transport": "file:../romi-js-rclnodejs-transport",
+    "@osrf/romi-js-rclnodejs-transport": "^0.1.0",
     "@types/jsonwebtoken": "^8.5.0",
     "@types/ws": "^7.2.6",
     "jsonwebtoken": "^8.5.1",

@@ -13,10 +13,6 @@ export function options(yargs: Argv) {
 
 type ConfigType = ReturnType<typeof options>['argv'];
 
-export interface Subscription {
-  unsubscribe(): void;
-}
-
 export interface SubscribeParams<T = unknown> {
   subscriptionId: string;
   topic: RomiTopic<T>;
@@ -107,7 +103,7 @@ export default class Ros2Plugin {
     this.transport.destroy();
   }
 
-  private _subscriptions: Record<string, Subscription> = {};
+  private _subscriptions: Record<string, RomiCore.Subscription> = {};
   private _publishers: Record<string, RomiCore.Publisher<unknown>> = {};
   private _idCounter = 0;
 }
