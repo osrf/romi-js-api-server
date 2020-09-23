@@ -4,10 +4,10 @@ import WebSocket from 'ws';
 import logger from './logger';
 import { WebSocketMiddleware } from './websocket-connect';
 
-export interface RpcRequest {
+export interface RpcRequest<T = unknown> {
   version: string;
   method: string;
-  params?: any;
+  params?: T;
   id?: string | number | null;
 }
 
@@ -16,12 +16,12 @@ export interface RpcError {
   message: string;
 }
 
-export interface RpcResponse {
+export interface RpcResponse<T = unknown> {
   version: string;
-  result?: any;
+  result?: T;
   more?: boolean;
   error?: RpcError;
-  id: string | number | null;
+  id: string | number;
 }
 
 export interface Sender<T = unknown> {
@@ -80,11 +80,27 @@ export default class ApiGateway {
     };
 
     try {
+      const handler = this._rpcHandlers[req.method];
+      if (!handler) {
+        logger.warn(`no handler for method "${req.method}`);
+        sender.error({
+          code: 1,
+          message: 'no such method',
+        });
+        return;
+      }
+
       const handlerRet = await this._rpcHandlers[req.method](req.params, sender);
-      if (this._rpcHandlers[req.method].length === 1 && handlerRet === undefined) {
-        sender.end(null);
-      } else if (handlerRet !== undefined) {
-        sender.end(handlerRet);
+      if (handlerRet === undefined) {
+        if (this._rpcHandlers[req.method].length === 1) {
+          sender.end(null);
+        }
+      } else {
+        if (this._rpcHandlers[req.method].length === 1) {
+          sender.end(handlerRet);
+        } else {
+          sender.send(handlerRet);
+        }
       }
     } catch (e) {
       sender.error(e);

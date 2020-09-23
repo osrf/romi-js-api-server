@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
@@ -20,17 +22,15 @@ async function loadPlugins(): Promise<Record<string, Plugin>> {
     .map((dirent) => dirent.name);
 
   const plugins: Record<string, Plugin> = {};
-  await Promise.all(
-    modules.map(async (module) => {
-      try {
-        const plugin = (await import(`./plugins/${module}`)) as Plugin;
-        plugin.options(yargs);
-        plugins[module] = plugin;
-      } catch (e) {
-        logger.error(`failed to load plugin "${module}": ${e}`);
-      }
-    }),
-  );
+  for (let module of modules) {
+    try {
+      const plugin = (await import(`./plugins/${module}`)) as Plugin;
+      plugin.options(yargs);
+      plugins[module] = plugin;
+    } catch (e) {
+      logger.error(`failed to load plugin "${module}": ${e}`);
+    }
+  }
   return plugins;
 }
 
@@ -107,10 +107,14 @@ async function main() {
   }
 
   const api = new ApiGateway();
-  Object.entries(plugins).forEach(([name, plugin]) => {
-    plugin.onLoad(config, api);
-    logger.info(`loaded plugin "${name}"`);
-  });
+  for (let [module, plugin] of Object.entries(plugins)) {
+    try {
+      await plugin.onLoad(config, api);
+      logger.info(`loaded plugin "${module}"`);
+    } catch (e) {
+      logger.error(`failed to load plugin "${module}": ${e}`);
+    }
+  }
   app.use(api.middleware);
 
   server.listen(config.port, config.host);

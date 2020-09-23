@@ -13,40 +13,47 @@ export function options(yargs: Argv) {
 
 type ConfigType = ReturnType<typeof options>['argv'];
 
+// TODO: We can't send functions across websockets, in the future, we can drop the depdency on
+// `RomiTopic` and `RomiService`, or have the next version of the `romi-js` move the validation to
+// the transport.
+export type Ros2Topic<Message> = Omit<RomiTopic<Message>, 'validate'>;
+export type Ros2Service<Request, Response> = Omit<
+  RomiService<Request, Response>,
+  'validateRequest' | 'validateResponse'
+>;
+
 export interface SubscribeParams<T = unknown> {
-  subscriptionId: string;
-  topic: RomiTopic<T>;
+  topic: Ros2Topic<T>;
+}
+
+export interface SubscribeResult {
+  id: number;
 }
 
 export interface UnsubscribeParams {
-  subscriptionId: string;
+  id: number;
 }
 
-export interface MessageParams<T = unknown> {
-  subscriptionId: string;
+export interface MessageResult<T = unknown> {
   message: T;
 }
 
 export interface CreatePublisherParams<T = unknown> {
-  topic: RomiTopic<T>;
+  topic: Ros2Topic<T>;
 }
 
 export interface PublishParams<T = unknown> {
-  publisherId: string;
+  id: number;
   message: T;
 }
 
 export interface DestroyPublisherParams {
-  publisherId: string;
+  id: number;
 }
 
 export interface ServiceCallParams<T = unknown> {
   request: T;
-  service: RomiService<T, unknown>;
-}
-
-export interface ServiceResponseParams<T = unknown> {
-  response: T;
+  service: Ros2Service<T, unknown>;
 }
 
 export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void> {
@@ -63,47 +70,65 @@ export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void>
 export default class Ros2Plugin {
   constructor(public transport: RomiCore.Transport) {}
 
-  subscribe(params: SubscribeParams, sender: Sender<MessageParams>): void {
-    this._subscriptions[params.subscriptionId] = this.transport.subscribe(params.topic, (msg) => {
+  subscribe(params: SubscribeParams, sender: Sender<MessageResult>): SubscribeResult {
+    const id = this._idCounter++;
+    this._subscriptions[id] = this.transport.subscribe(this._toRomiTopic(params.topic), (msg) => {
       sender.send({
-        subscriptionId: params.subscriptionId,
         message: msg,
       });
     });
+    return { id };
   }
 
   unsubscribe(params: UnsubscribeParams): void {
-    if (this._subscriptions[params.subscriptionId]) {
-      this._subscriptions[params.subscriptionId].unsubscribe();
-      delete this._subscriptions[params.subscriptionId];
+    if (this._subscriptions[params.id]) {
+      this._subscriptions[params.id].unsubscribe();
+      delete this._subscriptions[params.id];
     }
   }
 
-  createPublisher(params: CreatePublisherParams): string {
+  createPublisher(params: CreatePublisherParams): number {
     const id = this._idCounter++;
-    this._publishers[id] = this.transport.createPublisher(params.topic);
-    return id.toString();
+    this._publishers[id] = this.transport.createPublisher(this._toRomiTopic(params.topic));
+    return id;
   }
 
   publish(params: PublishParams): void {
-    if (this._publishers[params.publisherId]) {
-      this._publishers[params.publisherId].publish(params.message);
+    if (this._publishers[params.id]) {
+      this._publishers[params.id].publish(params.message);
     }
   }
 
   destroyPublisher(params: DestroyPublisherParams): void {
-    delete this._publishers[params.publisherId];
+    delete this._publishers[params.id];
   }
 
   async serviceCall(params: ServiceCallParams): Promise<unknown> {
-    return this.transport.call(params.service, params.request);
+    return this.transport.call(this._toRomiService(params.service), params.request);
   }
 
   destroy() {
     this.transport.destroy();
   }
 
-  private _subscriptions: Record<string, RomiCore.Subscription> = {};
-  private _publishers: Record<string, RomiCore.Publisher<unknown>> = {};
+  private _subscriptions: Record<number, RomiCore.Subscription> = {};
+  private _publishers: Record<number, RomiCore.Publisher<unknown>> = {};
   private _idCounter = 0;
+
+  private _toRomiTopic(ros2Topic: Ros2Topic<unknown>): RomiTopic<unknown> {
+    return {
+      ...ros2Topic,
+      validate: (msg) => msg,
+    };
+  }
+
+  private _toRomiService(
+    ros2Service: Ros2Service<unknown, unknown>,
+  ): RomiService<unknown, unknown> {
+    return {
+      ...ros2Service,
+      validateRequest: (msg) => msg,
+      validateResponse: (msg) => msg,
+    };
+  }
 }

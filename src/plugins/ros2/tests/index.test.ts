@@ -1,6 +1,6 @@
 import { RomiService, RomiTopic } from '@osrf/romi-js-core-interfaces';
 import RclnodejsTransport from '@osrf/romi-js-rclnodejs-transport';
-import Ros2Plugin, { MessageParams } from '..';
+import Ros2Plugin, { MessageResult, SubscribeResult } from '..';
 import { Sender } from '../../../api-gateway';
 
 type TestMessage = { data: string };
@@ -40,9 +40,8 @@ afterEach(() => {
 
 test('can subscribe', (done) => {
   const sender: Sender = {
-    send: jest.fn((result: MessageParams) => {
-      expect(result.subscriptionId).toBe('testId');
-      expect((result.message as TestMessage).data).toBe('test');
+    send: jest.fn((result: MessageResult) => {
+      expect(((result as MessageResult).message as TestMessage).data).toBe('test');
       done();
     }),
     end: jest.fn(),
@@ -51,7 +50,6 @@ test('can subscribe', (done) => {
 
   plugin.subscribe(
     {
-      subscriptionId: 'testId',
       topic: testTopic,
     },
     sender,
@@ -63,29 +61,28 @@ test('can subscribe', (done) => {
 
 test('can unsubscribe', (done) => {
   let receiveCount = 0;
+  let id: number;
 
   const sender: Sender = {
     send: jest.fn(() => {
-      if (receiveCount > 1) {
+      if (receiveCount++ > 1) {
         fail('received subscription even after unsubscribe');
       }
 
-      receiveCount++;
       plugin.unsubscribe({
-        subscriptionId: 'testId',
+        id,
       });
     }),
     end: jest.fn(),
     error: jest.fn(),
   };
 
-  plugin.subscribe(
+  id = plugin.subscribe(
     {
-      subscriptionId: 'testId',
       topic: testTopic,
     },
     sender,
-  );
+  ).id;
 
   const publisher = sourceTransport.createPublisher(testTopic);
   timer = setInterval(() => publisher.publish({ data: 'test' }), 10);
@@ -103,10 +100,7 @@ test('can publish', (done) => {
   });
 
   const publisher = plugin.createPublisher({ topic: testTopic });
-  timer = setInterval(
-    () => plugin.publish({ publisherId: publisher, message: { data: 'test' } }),
-    10,
-  );
+  timer = setInterval(() => plugin.publish({ id: publisher, message: { data: 'test' } }), 10);
 });
 
 test('can call service', async () => {

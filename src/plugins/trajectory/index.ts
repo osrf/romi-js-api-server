@@ -14,19 +14,9 @@ export function options(yargs: Argv) {
 type ConfigType = ReturnType<typeof options>['argv'];
 
 export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void> {
-  logger.info(`connecting to trajectory server at ${config.trajectoryServerUrl}`);
-  try {
-    const socket = new WebSocket(config.trajectoryServerUrl, { handshakeTimeout: 5000 });
-
-    (await new Promise((res) => socket.once('open', res))) as WebSocket;
-    logger.info('succesfully connected to trajectory server');
-
-    const plugin = new TrajectoryPlugin(socket);
-    api.registerHandler('latestTrajectory', (params) => plugin.latestTrajectory(params));
-    api.registerHandler('trajectoryServerTime', (params) => plugin.serverTime(params));
-  } catch {
-    logger.error('unable to connect to trajectory server');
-  }
+  const plugin = new TrajectoryPlugin(config);
+  api.registerHandler('latestTrajectory', (params) => plugin.latestTrajectory(params));
+  api.registerHandler('trajectoryServerTime', (params) => plugin.serverTime(params));
 }
 
 interface TrajectoryRequest {
@@ -83,11 +73,9 @@ export type TrajectoryServerTimeParams = Omit<TimeRequest, 'request'>;
 export type TrajectoryServerTimeResult = Omit<TimeResponse, 'response'>;
 
 export default class TrajectoryPlugin {
-  constructor(public socket: WebSocket) {
-    this.socket.on('message', (data) => {
-      const resolve = this._ongoingRequests.shift();
-      resolve && resolve(data);
-    });
+  socket?: WebSocket;
+
+  constructor(private _config: ConfigType) {
   }
 
   async latestTrajectory(params: LatestTrajectoryParams): Promise<LatestTrajectoryResult> {
@@ -95,7 +83,7 @@ export default class TrajectoryPlugin {
       request: 'trajectory',
       ...params,
     };
-    this.socket.send(JSON.stringify(request));
+    this._send(JSON.stringify(request));
 
     const data = await new Promise((res) => this._ongoingRequests.push(res));
     assert.ok(typeof data === 'string');
@@ -114,7 +102,7 @@ export default class TrajectoryPlugin {
       request: 'time',
       ...params,
     };
-    this.socket.send(JSON.stringify(request));
+    this._send(JSON.stringify(request));
 
     const data = await new Promise((res) => this._ongoingRequests.push(res));
     assert.ok(typeof data === 'string');
@@ -125,5 +113,33 @@ export default class TrajectoryPlugin {
     return resp as TrajectoryServerTimeResult;
   }
 
+  private static async _connect(config: ConfigType): Promise<WebSocket> {
+    logger.info(`connecting to trajectory server at ${config.trajectoryServerUrl}`);
+    const socket = new WebSocket(config.trajectoryServerUrl, { handshakeTimeout: 5000 });
+
+    await new Promise((res, rej) => {
+      const errorHandler = (error: Error) => rej(error);
+      socket.on('error', errorHandler);
+      socket.once('open', () => {
+        socket.off('close', errorHandler);
+        res();
+      });
+    });
+    logger.info('succesfully connected to trajectory server');
+    return socket;
+  }
+
   private _ongoingRequests: ((data: unknown) => void)[] = [];
+
+  private async _send(payload: WebSocket.Data): Promise<void> {
+    if (!this.socket) {
+      this._ongoingRequests = [];
+      this.socket = await TrajectoryPlugin._connect(this._config);
+      this.socket.on('message', (data) => {
+        const resolve = this._ongoingRequests.shift();
+        resolve && resolve(data);
+      });
+    }
+    this.socket.send(payload);
+  }
 }

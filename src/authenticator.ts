@@ -28,6 +28,7 @@ export default function auhthenticator(options: Options): WebSocketMiddleware {
 
     jwt.verify(data, secretOrPublicKey); // will throw if invalid
     socket.authorized = true;
+    socket.send('ok');
     // don't call `next()`, authentication message should not be chained to downstream middlewares.
   };
 }

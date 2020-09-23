@@ -74,7 +74,7 @@ test('object request params', (done) => {
     expect(resp.id).toBe(0);
     expect(resp.error).toBeUndefined();
     expect(resp.more).toBeUndefined();
-    expect(resp.result.data).toBe('world');
+    expect((resp.result as any).data).toBe('world');
     done();
   });
   client.once('open', () => client.send(makeRpcRequest('test', { data: 'hello' }, 0)));
@@ -157,13 +157,13 @@ test('async rpc streaming responses', (done) => {
   const received: number[] = [];
   const client = new WebSocket(url);
   client.on('message', (data: Buffer) => {
-    const resp = msgpack.decode(data) as RpcResponse;
+    const resp = msgpack.decode(data) as RpcResponse<number>;
     if (resp.result === 9 || resp.result === 10) {
       expect(resp.more).toBeUndefined();
     } else {
       expect(resp.more).toBe(true);
     }
-    received.push(resp.result);
+    received.push(resp.result!);
     if (received.length >= 11) {
       for (let i = 0; i <= 10; i++) {
         expect(received[i]).toBe(i);
