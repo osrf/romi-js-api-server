@@ -38,5 +38,9 @@
   },
   "bin": {
     "romi-js-api-server": "src/index.js"
-  }
+  },
+  "files": [
+    "src/**/*.js",
+    "src/**/*.d.ts"
+  ]
 }
