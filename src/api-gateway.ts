@@ -98,7 +98,7 @@ export default class ApiGateway {
         return;
       }
 
-      const handlerRet = await this._rpcHandlers[req.method](req.params, sender);
+      const handlerRet = await handler(req.params, sender);
       if (handlerRet === undefined) {
         if (this._rpcHandlers[req.method].length === 1) {
           sender.end(null);
@@ -111,7 +111,7 @@ export default class ApiGateway {
         }
       }
     } catch (e) {
-      sender.error(e);
+      sender.error({ code: 1, message: e.message });
     }
     next();
   }

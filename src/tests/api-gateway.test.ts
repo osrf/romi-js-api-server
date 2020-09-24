@@ -1,6 +1,6 @@
 import * as msgpack from '@msgpack/msgpack';
 import WebSocket from 'ws';
-import ApiGateway, { RpcError, RpcRequest, RpcResponse } from '../api-gateway';
+import ApiGateway, { RpcRequest, RpcResponse } from '../api-gateway';
 import WebSocketConnect from '../websocket-connect';
 
 function echo(params: any) {
@@ -109,11 +109,7 @@ test('request using string id results in a response with string id', (done) => {
 
 test('rpc error', (done) => {
   api.registerHandler('test', () => {
-    const rpcError: RpcError = {
-      code: 1,
-      message: 'test error',
-    };
-    throw rpcError;
+    throw new Error('test error');
   });
 
   const client = new WebSocket(url);
