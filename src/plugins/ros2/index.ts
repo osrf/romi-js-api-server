@@ -76,14 +76,24 @@ export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void>
   const plugin = new Ros2Plugin(transport);
   api.registerHandler('ros2Subscribe', (params, send) => plugin.subscribe(params, send));
   api.registerHandler('ros2Unsubscribe', (params) => plugin.unsubscribe(params));
-  api.registerHandler('ros2CreatePublisher', (params) => plugin.createPublisher(params));
+  api.registerHandler('ros2CreatePublisher', (params, send) =>
+    plugin.createPublisher(params, send),
+  );
   api.registerHandler('ros2Publish', (params) => plugin.publish(params));
   api.registerHandler('ros2ServiceCall', (params) => plugin.serviceCall(params));
 }
 
 export default class Ros2Plugin {
+  get subscriptionCount(): number {
+    return Object.keys(this._subscriptions).length;
+  }
+
   get innerSubscriptionCount(): number {
     return this._innerSubscriptions.length;
+  }
+
+  get publisherCount(): number {
+    return Object.keys(this._publishers).length;
   }
 
   get innerPublisherCount(): number {
@@ -93,7 +103,13 @@ export default class Ros2Plugin {
   constructor(public transport: RomiCore.Transport) {}
 
   subscribe(params: SubscribeParams, sender: Sender<MessageResult>): SubscribeResult {
-    const clientId = this._clientIdCounter++;
+    const id = this._idCounter++;
+
+    sender.socket.once('close', () => {
+      delete this._subscriptions[id].callbacks[id];
+      delete this._subscriptions[id];
+    });
+
     const found = this._innerSubscriptions.find((record) => deepEqual(record.topic, params.topic));
     let record: SubscriptionRecord;
     if (found) {
@@ -101,7 +117,7 @@ export default class Ros2Plugin {
     } else {
       const newRecord: SubscriptionRecord = {
         callbacks: {
-          [clientId]: (msg) => sender.send({ message: msg }),
+          [id]: (msg) => sender.send({ message: msg }),
         },
         subscription: this.transport.subscribe(this.toRomiTopic(params.topic), (msg) =>
           Object.values(newRecord.callbacks).forEach((cb) => cb(msg)),
@@ -111,9 +127,9 @@ export default class Ros2Plugin {
       this._innerSubscriptions.push(newRecord);
       record = newRecord;
     }
-    record.callbacks[clientId] = (msg) => sender.send({ message: msg });
-    this._subscriptions[clientId] = record;
-    return { id: clientId };
+    record.callbacks[id] = (msg) => sender.send({ message: msg });
+    this._subscriptions[id] = record;
+    return { id: id };
   }
 
   unsubscribe(params: UnsubscribeParams): void {
@@ -123,8 +139,13 @@ export default class Ros2Plugin {
     }
   }
 
-  createPublisher(params: CreatePublisherParams): number {
-    const clientId = this._clientIdCounter++;
+  createPublisher(params: CreatePublisherParams, sender: Sender<never>): number {
+    const id = this._idCounter++;
+
+    sender.socket.once('close', () => {
+      delete this._publishers[id];
+    });
+
     const found = this._innerPublishers.find((record) => deepEqual(record.topic, params.topic));
     let record: PublisherRecord;
     if (found) {
@@ -137,8 +158,8 @@ export default class Ros2Plugin {
       record = newRecord;
       this._innerPublishers.push(record);
     }
-    this._publishers[clientId] = record;
-    return clientId;
+    this._publishers[id] = record;
+    return id;
   }
 
   publish(params: PublishParams): void {
@@ -172,14 +193,4 @@ export default class Ros2Plugin {
   private _publishers: Record<number, PublisherRecord> = {};
   private _innerPublishers: PublisherRecord[] = [];
   private _idCounter = 0;
-  private _clientIdCounter = 0;
-
-  private _createPublisher(topic: Ros2Topic): number {
-    const id = this._idCounter++;
-    this._publishers[id] = {
-      topic,
-      publisher: this.transport.createPublisher(this.toRomiTopic(topic)),
-    };
-    return id;
-  }
 }

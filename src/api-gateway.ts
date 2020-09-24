@@ -25,6 +25,7 @@ export interface RpcResponse<T = unknown> {
 }
 
 export interface Sender<T = unknown> {
+  socket: WebSocket;
   send(data: T): void;
   end(data: T): void;
   error(error: RpcError): void;
@@ -65,6 +66,7 @@ export default class ApiGateway {
     };
 
     const sender: Sender = {
+      socket,
       send: (data) =>
         req.id !== undefined &&
         req.id !== null &&

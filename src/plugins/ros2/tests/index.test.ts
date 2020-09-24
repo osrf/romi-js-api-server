@@ -1,5 +1,6 @@
 import { DurabilityPolicy, HistoryPolicy, ReliabilityPolicy } from '@osrf/romi-js-core-interfaces';
 import RclnodejsTransport from '@osrf/romi-js-rclnodejs-transport';
+import * as events from 'events';
 import Ros2Plugin, { MessageResult, Ros2Service, Ros2Topic } from '..';
 import { Sender } from '../../../api-gateway';
 
@@ -7,11 +8,8 @@ type TestMessage = { data: string };
 type TestServiceRequest = { data: boolean };
 type TestServiceResponse = { success: boolean; message: string };
 
-const mockSender = {
-  send: jest.fn(),
-  end: jest.fn(),
-  error: jest.fn(),
-};
+let mockSocket: any;
+let mockSender: Sender<any>;
 
 let count = 0;
 let testTopic: Ros2Topic<TestMessage>;
@@ -21,6 +19,14 @@ let plugin: Ros2Plugin;
 let timer: NodeJS.Timeout;
 
 beforeEach(async () => {
+  mockSocket = new events.EventEmitter() as any;
+  mockSender = {
+    socket: mockSocket,
+    send: jest.fn(),
+    end: jest.fn(),
+    error: jest.fn(),
+  };
+
   testTopic = {
     topic: `test_${count}`,
     type: 'std_msgs/msg/String',
@@ -43,6 +49,7 @@ afterEach(() => {
 
 test('can subscribe', (done) => {
   const sender: Sender = {
+    socket: mockSocket,
     send: jest.fn((result: MessageResult) => {
       expect(((result as MessageResult).message as TestMessage).data).toBe('test');
       done();
@@ -110,11 +117,20 @@ test('new subscription for different options', () => {
   expect(plugin.innerSubscriptionCount).toBe(2);
 });
 
+test('client subscriptions get cleared when connection is closed', () => {
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  expect(plugin.subscriptionCount).toBe(2);
+  mockSender.socket.emit('close');
+  expect(plugin.subscriptionCount).toBe(0);
+});
+
 test('can unsubscribe', (done) => {
   let receiveCount = 0;
   let id: number;
 
   const sender: Sender = {
+    socket: mockSocket,
     send: jest.fn(() => {
       if (receiveCount++ > 1) {
         fail('received subscription even after unsubscribe');
@@ -148,6 +164,7 @@ test('unsubscribing same inner topic does not stop other subscriptions', (done) 
   let receiveCount = 0;
 
   const sender: Sender = {
+    socket: mockSocket,
     send: jest.fn(() => {
       if (receiveCount++ > 5) {
         done();
@@ -171,33 +188,33 @@ test('can publish', (done) => {
     done();
   });
 
-  const publisher = plugin.createPublisher({ topic: testTopic });
+  const publisher = plugin.createPublisher({ topic: testTopic }, mockSender);
   timer = setInterval(() => plugin.publish({ id: publisher, message: { data: 'test' } }), 10);
 });
 
 test('reuse publisher for same topic, type and options', () => {
-  plugin.createPublisher({ topic: testTopic });
-  plugin.createPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic }, mockSender);
+  plugin.createPublisher({ topic: testTopic }, mockSender);
   expect(plugin.innerPublisherCount).toBe(1);
 });
 
 test('new publisher for different topic name', () => {
-  plugin.createPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic }, mockSender);
   const newTopic: Ros2Topic = {
     ...testTopic,
     topic: 'newTopic',
   };
-  plugin.createPublisher({ topic: newTopic });
+  plugin.createPublisher({ topic: newTopic }, mockSender);
   expect(plugin.innerPublisherCount).toBe(2);
 });
 
 test('new publisher for different message type', () => {
-  plugin.createPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic }, mockSender);
   const newTopic: Ros2Topic = {
     ...testTopic,
     type: 'std_msgs/msg/Bool',
   };
-  plugin.createPublisher({ topic: newTopic });
+  plugin.createPublisher({ topic: newTopic }, mockSender);
   expect(plugin.innerPublisherCount).toBe(2);
 });
 
@@ -213,7 +230,7 @@ test('new publisher for different options', () => {
       },
     },
   };
-  plugin.createPublisher({ topic: topic1 });
+  plugin.createPublisher({ topic: topic1 }, mockSender);
   const topic2: Ros2Topic = {
     ...testTopic,
     options: {
@@ -225,8 +242,16 @@ test('new publisher for different options', () => {
       },
     },
   };
-  plugin.createPublisher({ topic: topic2 });
+  plugin.createPublisher({ topic: topic2 }, mockSender);
   expect(plugin.innerPublisherCount).toBe(2);
+});
+
+test('client publishers get cleared when connection is closed', () => {
+  plugin.createPublisher({ topic: testTopic }, mockSender);
+  plugin.createPublisher({ topic: testTopic }, mockSender);
+  expect(plugin.publisherCount).toBe(2);
+  mockSender.socket.emit('close');
+  expect(plugin.publisherCount).toBe(0);
 });
 
 test('can call service', async () => {
