@@ -1,8 +1,10 @@
 import * as msgpack from '@msgpack/msgpack';
 import * as assert from 'assert';
 import WebSocket from 'ws';
-import logger from './logger';
+import logger, { CustomLogger } from './logger';
 import { WebSocketMiddleware } from './websocket-connect';
+
+export { CustomLogger as Logger };
 
 export interface RpcRequest<T = unknown> {
   version: string;
@@ -44,6 +46,10 @@ export default class ApiGateway {
   registerHandler(method: string, cb: RpcHandler): void {
     this._rpcHandlers[method] = cb;
     logger.info(`registered handler for "${method}"`);
+  }
+
+  getLogger(name: string): CustomLogger {
+    return logger.child({ tag: name });
   }
 
   private _rpcHandlers: Record<string, RpcHandler> = {};

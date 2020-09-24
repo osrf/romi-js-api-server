@@ -1,6 +1,7 @@
 import { DurabilityPolicy, HistoryPolicy, ReliabilityPolicy } from '@osrf/romi-js-core-interfaces';
 import RclnodejsTransport from '@osrf/romi-js-rclnodejs-transport';
 import * as events from 'events';
+import winston from 'winston';
 import Ros2Plugin, { MessageResult, Ros2Service, Ros2Topic } from '..';
 import { Sender } from '../../../api-gateway';
 
@@ -38,7 +39,13 @@ beforeEach(async () => {
   sourceTransport = await RclnodejsTransport.create(`source_${count}`);
   const transport = await RclnodejsTransport.create(`test_${count}`);
   count++;
-  plugin = new Ros2Plugin(transport);
+  plugin = new Ros2Plugin(
+    transport,
+    winston.createLogger({
+      transports: new winston.transports.Console(),
+      format: winston.format.simple(),
+    }),
+  );
 });
 
 afterEach(() => {

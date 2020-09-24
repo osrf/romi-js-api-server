@@ -3,7 +3,7 @@ import { RomiService, RomiTopic } from '@osrf/romi-js-core-interfaces';
 import RclnodejsTransport from '@osrf/romi-js-rclnodejs-transport';
 import deepEqual from 'fast-deep-equal';
 import { Argv } from 'yargs';
-import ApiGateway, { Sender } from '../../api-gateway';
+import ApiGateway, { Logger, Sender } from '../../api-gateway';
 
 export function options(yargs: Argv) {
   return yargs.option('ros2NodeName', {
@@ -73,7 +73,7 @@ interface SubscriptionRecord {
 
 export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void> {
   const transport = await RclnodejsTransport.create(config.ros2NodeName);
-  const plugin = new Ros2Plugin(transport);
+  const plugin = new Ros2Plugin(transport, api.getLogger('ros2'));
   api.registerHandler('ros2Subscribe', (params, send) => plugin.subscribe(params, send));
   api.registerHandler('ros2Unsubscribe', (params) => plugin.unsubscribe(params));
   api.registerHandler('ros2CreatePublisher', (params, send) =>
@@ -100,14 +100,16 @@ export default class Ros2Plugin {
     return this._innerPublishers.length;
   }
 
-  constructor(public transport: RomiCore.Transport) {}
+  constructor(public transport: RomiCore.Transport, private _logger: Logger) {}
 
   subscribe(params: SubscribeParams, sender: Sender<MessageResult>): SubscribeResult {
     const id = this._idCounter++;
 
     sender.socket.once('close', () => {
       delete this._subscriptions[id].callbacks[id];
+      this._logger.info(`removed inner handler for subscription ${id}`);
       delete this._subscriptions[id];
+      this._logger.info(`removed subscription ${id}`);
     });
 
     const found = this._innerSubscriptions.find((record) => deepEqual(record.topic, params.topic));
@@ -124,6 +126,7 @@ export default class Ros2Plugin {
         ),
         topic: params.topic,
       };
+      this._logger.info(`created inner subscription for "${params.topic.topic}"`);
       this._innerSubscriptions.push(newRecord);
       record = newRecord;
     }
@@ -134,8 +137,12 @@ export default class Ros2Plugin {
 
   unsubscribe(params: UnsubscribeParams): void {
     const record = this._subscriptions[params.id];
+    const { id } = params;
     if (record) {
-      delete record.callbacks[params.id];
+      delete this._subscriptions[id].callbacks[id];
+      this._logger.info(`removed inner handler for subscription ${id}`);
+      delete this._subscriptions[id];
+      this._logger.info(`removed subscription ${id}`);
     }
   }
 
@@ -144,6 +151,7 @@ export default class Ros2Plugin {
 
     sender.socket.once('close', () => {
       delete this._publishers[id];
+      this._logger.info(`removed publisher ${id}`);
     });
 
     const found = this._innerPublishers.find((record) => deepEqual(record.topic, params.topic));
@@ -155,6 +163,7 @@ export default class Ros2Plugin {
         publisher: this.transport.createPublisher(this.toRomiTopic(params.topic)),
         topic: params.topic,
       };
+      this._logger.info(`created inner publisher for "${params.topic.topic}"`);
       record = newRecord;
       this._innerPublishers.push(record);
     }
