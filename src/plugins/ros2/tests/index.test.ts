@@ -7,6 +7,12 @@ type TestMessage = { data: string };
 type TestServiceRequest = { data: boolean };
 type TestServiceResponse = { success: boolean; message: string };
 
+const mockSender = {
+  send: jest.fn(),
+  end: jest.fn(),
+  error: jest.fn(),
+};
+
 let count = 0;
 let testTopic: Ros2Topic<TestMessage>;
 let testService: Ros2Service<TestServiceRequest, TestServiceResponse>;
@@ -32,7 +38,7 @@ beforeEach(async () => {
 afterEach(() => {
   clearInterval(timer);
   sourceTransport.destroy();
-  plugin.destroy();
+  plugin.transport.destroy();
 });
 
 test('can subscribe', (done) => {
@@ -54,6 +60,54 @@ test('can subscribe', (done) => {
 
   const publisher = sourceTransport.createPublisher(plugin.toRomiTopic(testTopic));
   timer = setInterval(() => publisher.publish({ data: 'test' }), 10);
+});
+
+test('share inner subscriptions for same topic, type and options', () => {
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  expect(plugin.innerSubscriptionCount).toBe(1);
+});
+
+test('new subscription for different topic', () => {
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  const newTopic: Ros2Topic = { ...testTopic, topic: 'newTopic' };
+  plugin.subscribe({ topic: newTopic }, mockSender);
+  expect(plugin.innerSubscriptionCount).toBe(2);
+});
+
+test('new subscription for different type', () => {
+  plugin.subscribe({ topic: testTopic }, mockSender);
+  const newTopic: Ros2Topic = { ...testTopic, type: 'std_msgs/msg/Bool' };
+  plugin.subscribe({ topic: newTopic }, mockSender);
+  expect(plugin.innerSubscriptionCount).toBe(2);
+});
+
+test('new subscription for different options', () => {
+  const topic1: Ros2Topic = {
+    ...testTopic,
+    options: {
+      qos: {
+        depth: 1,
+        durabilityPolicy: DurabilityPolicy.SystemDefault,
+        historyPolicy: HistoryPolicy.SystemDefault,
+        reliabilityPolicy: ReliabilityPolicy.SystemDefault,
+      },
+    },
+  };
+  plugin.subscribe({ topic: topic1 }, mockSender);
+  const topic2: Ros2Topic = {
+    ...testTopic,
+    options: {
+      qos: {
+        depth: 2,
+        durabilityPolicy: DurabilityPolicy.SystemDefault,
+        historyPolicy: HistoryPolicy.SystemDefault,
+        reliabilityPolicy: ReliabilityPolicy.SystemDefault,
+      },
+    },
+  };
+  plugin.subscribe({ topic: topic2 }, mockSender);
+  expect(plugin.innerSubscriptionCount).toBe(2);
 });
 
 test('can unsubscribe', (done) => {
@@ -90,44 +144,65 @@ test('can unsubscribe', (done) => {
   }, 1000);
 }, 5000);
 
+test('unsubscribing same inner topic does not stop other subscriptions', (done) => {
+  let receiveCount = 0;
+
+  const sender: Sender = {
+    send: jest.fn(() => {
+      if (receiveCount++ > 5) {
+        done();
+      }
+    }),
+    end: jest.fn(),
+    error: jest.fn(),
+  };
+
+  plugin.subscribe({ topic: testTopic }, sender).id;
+  const id = plugin.subscribe({ topic: testTopic }, mockSender).id;
+  plugin.unsubscribe({ id });
+
+  const publisher = sourceTransport.createPublisher(plugin.toRomiTopic(testTopic));
+  timer = setInterval(() => publisher.publish({ data: 'test' }), 10);
+});
+
 test('can publish', (done) => {
   sourceTransport.subscribe(plugin.toRomiTopic(testTopic), (msg: TestMessage) => {
     expect(msg.data).toBe('test');
     done();
   });
 
-  const publisher = plugin.getPublisher({ topic: testTopic });
+  const publisher = plugin.createPublisher({ topic: testTopic });
   timer = setInterval(() => plugin.publish({ id: publisher, message: { data: 'test' } }), 10);
 });
 
 test('reuse publisher for same topic, type and options', () => {
-  const id = plugin.getPublisher({ topic: testTopic });
-  const id2 = plugin.getPublisher({ topic: testTopic });
-  expect(id).toBe(id2);
+  plugin.createPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic });
+  expect(plugin.innerPublisherCount).toBe(1);
 });
 
 test('new publisher for different topic name', () => {
-  const id = plugin.getPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic });
   const newTopic: Ros2Topic = {
     ...testTopic,
     topic: 'newTopic',
   };
-  const id2 = plugin.getPublisher({ topic: newTopic });
-  expect(id).not.toBe(id2);
+  plugin.createPublisher({ topic: newTopic });
+  expect(plugin.innerPublisherCount).toBe(2);
 });
 
 test('new publisher for different message type', () => {
-  const id = plugin.getPublisher({ topic: testTopic });
+  plugin.createPublisher({ topic: testTopic });
   const newTopic: Ros2Topic = {
     ...testTopic,
     type: 'std_msgs/msg/Bool',
   };
-  const id2 = plugin.getPublisher({ topic: newTopic });
-  expect(id).not.toBe(id2);
+  plugin.createPublisher({ topic: newTopic });
+  expect(plugin.innerPublisherCount).toBe(2);
 });
 
 test('new publisher for different options', () => {
-  const topic: Ros2Topic = {
+  const topic1: Ros2Topic = {
     ...testTopic,
     options: {
       qos: {
@@ -138,8 +213,8 @@ test('new publisher for different options', () => {
       },
     },
   };
-  const id = plugin.getPublisher({ topic: topic });
-  const newTopic: Ros2Topic = {
+  plugin.createPublisher({ topic: topic1 });
+  const topic2: Ros2Topic = {
     ...testTopic,
     options: {
       qos: {
@@ -150,8 +225,8 @@ test('new publisher for different options', () => {
       },
     },
   };
-  const id2 = plugin.getPublisher({ topic: newTopic });
-  expect(id).not.toBe(id2);
+  plugin.createPublisher({ topic: topic2 });
+  expect(plugin.innerPublisherCount).toBe(2);
 });
 
 test('can call service', async () => {

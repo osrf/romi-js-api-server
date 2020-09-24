@@ -60,62 +60,94 @@ export interface ServiceCallParams<T = unknown> {
   service: Ros2Service<T, unknown>;
 }
 
+interface PublisherRecord {
+  topic: Ros2Topic;
+  publisher: RomiCore.Publisher<unknown>;
+}
+
+interface SubscriptionRecord {
+  topic: Ros2Topic;
+  subscription: RomiCore.Subscription;
+  callbacks: Record<number, (msg: unknown) => void>;
+}
+
 export async function onLoad(config: ConfigType, api: ApiGateway): Promise<void> {
   const transport = await RclnodejsTransport.create(config.ros2NodeName);
   const plugin = new Ros2Plugin(transport);
   api.registerHandler('ros2Subscribe', (params, send) => plugin.subscribe(params, send));
   api.registerHandler('ros2Unsubscribe', (params) => plugin.unsubscribe(params));
-  api.registerHandler('ros2CreatePublisher', (params) => plugin.getPublisher(params));
+  api.registerHandler('ros2CreatePublisher', (params) => plugin.createPublisher(params));
   api.registerHandler('ros2Publish', (params) => plugin.publish(params));
-  api.registerHandler('ros2DestroyPublisher', (params) => plugin.destroyPublisher(params));
   api.registerHandler('ros2ServiceCall', (params) => plugin.serviceCall(params));
 }
 
 export default class Ros2Plugin {
+  get innerSubscriptionCount(): number {
+    return this._innerSubscriptions.length;
+  }
+
+  get innerPublisherCount(): number {
+    return this._innerPublishers.length;
+  }
+
   constructor(public transport: RomiCore.Transport) {}
 
   subscribe(params: SubscribeParams, sender: Sender<MessageResult>): SubscribeResult {
-    const id = this._idCounter++;
-    this._subscriptions[id] = this.transport.subscribe(this.toRomiTopic(params.topic), (msg) => {
-      sender.send({
-        message: msg,
-      });
-    });
-    return { id };
+    const clientId = this._clientIdCounter++;
+    const found = this._innerSubscriptions.find((record) => deepEqual(record.topic, params.topic));
+    let record: SubscriptionRecord;
+    if (found) {
+      record = found;
+    } else {
+      const newRecord: SubscriptionRecord = {
+        callbacks: {
+          [clientId]: (msg) => sender.send({ message: msg }),
+        },
+        subscription: this.transport.subscribe(this.toRomiTopic(params.topic), (msg) =>
+          Object.values(newRecord.callbacks).forEach((cb) => cb(msg)),
+        ),
+        topic: params.topic,
+      };
+      this._innerSubscriptions.push(newRecord);
+      record = newRecord;
+    }
+    record.callbacks[clientId] = (msg) => sender.send({ message: msg });
+    this._subscriptions[clientId] = record;
+    return { id: clientId };
   }
 
   unsubscribe(params: UnsubscribeParams): void {
-    if (this._subscriptions[params.id]) {
-      this._subscriptions[params.id].unsubscribe();
-      delete this._subscriptions[params.id];
+    const record = this._subscriptions[params.id];
+    if (record) {
+      delete record.callbacks[params.id];
     }
   }
 
-  getPublisher(params: CreatePublisherParams): number {
-    const found = Object.entries(this._publishers).find(([_id, item]) =>
-      deepEqual(item[0], params.topic),
-    );
+  createPublisher(params: CreatePublisherParams): number {
+    const clientId = this._clientIdCounter++;
+    const found = this._innerPublishers.find((record) => deepEqual(record.topic, params.topic));
+    let record: PublisherRecord;
     if (found) {
-      return parseInt(found[0]);
+      record = found;
+    } else {
+      const newRecord: PublisherRecord = {
+        publisher: this.transport.createPublisher(this.toRomiTopic(params.topic)),
+        topic: params.topic,
+      };
+      record = newRecord;
+      this._innerPublishers.push(record);
     }
-    return this._createPublisher(params.topic);
+    this._publishers[clientId] = record;
+    return clientId;
   }
 
   publish(params: PublishParams): void {
-    const pub = this._publishers[params.id];
-    pub && pub[1].publish(params.message);
-  }
-
-  destroyPublisher(params: DestroyPublisherParams): void {
-    delete this._publishers[params.id];
+    const record = this._publishers[params.id];
+    record && record.publisher.publish(params.message);
   }
 
   async serviceCall(params: ServiceCallParams): Promise<unknown> {
     return this.transport.call(this.toRomiService(params.service), params.request);
-  }
-
-  destroy() {
-    this.transport.destroy();
   }
 
   toRomiTopic<Message = unknown>(ros2Topic: Ros2Topic<Message>): RomiTopic<Message> {
@@ -135,13 +167,19 @@ export default class Ros2Plugin {
     };
   }
 
-  private _subscriptions: Record<number, RomiCore.Subscription> = {};
-  private _publishers: Record<number, [Ros2Topic, RomiCore.Publisher<unknown>]> = {};
+  private _subscriptions: Record<number, SubscriptionRecord> = {};
+  private _innerSubscriptions: SubscriptionRecord[] = [];
+  private _publishers: Record<number, PublisherRecord> = {};
+  private _innerPublishers: PublisherRecord[] = [];
   private _idCounter = 0;
+  private _clientIdCounter = 0;
 
   private _createPublisher(topic: Ros2Topic): number {
     const id = this._idCounter++;
-    this._publishers[id] = [topic, this.transport.createPublisher(this.toRomiTopic(topic))];
+    this._publishers[id] = {
+      topic,
+      publisher: this.transport.createPublisher(this.toRomiTopic(topic)),
+    };
     return id;
   }
 }
